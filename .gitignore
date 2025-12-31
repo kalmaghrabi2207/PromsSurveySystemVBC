@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+coverage
+.env
+.env.*
+*.log
+.DS_Store
+
+# Backend
+backend/dist
+backend/uploads
+
+# Frontend
+frontend/.next
+
