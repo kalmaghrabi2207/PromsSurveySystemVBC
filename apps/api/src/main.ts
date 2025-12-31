@@ -7,10 +7,16 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./modules/app.module";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: true });
+  const app = await NestFactory.create(AppModule, {
+    cors: {
+      origin: true,
+      credentials: true
+    }
+  });
 
   app.use(helmet());
   app.use(cookieParser());
+  app.setGlobalPrefix("v1");
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true })
   );
@@ -22,6 +28,10 @@ async function bootstrap() {
     .addApiKey({ type: "apiKey", in: "header", name: "X-EMR-Api-Key" }, "emr")
     .addBearerAuth()
     .addApiKey({ type: "apiKey", in: "header", name: "X-Tenant-Id" }, "tenant")
+    .addHeader("Idempotency-Key", {
+      description: "Idempotency key for safe retries",
+      required: false
+    })
     .build();
 
   const doc = SwaggerModule.createDocument(app, config);
