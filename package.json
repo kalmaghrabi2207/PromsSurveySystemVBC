@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "backend",
+    "frontend"
   ],
   "scripts": {
     "dev": "npm run -ws dev",

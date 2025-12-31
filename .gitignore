@@ -7,6 +7,10 @@ coverage
 *.log
 .DS_Store
 
-# Prisma
-apps/api/prisma/migrations
+# Backend
+backend/dist
+backend/uploads
+
+# Frontend
+frontend/.next
 
