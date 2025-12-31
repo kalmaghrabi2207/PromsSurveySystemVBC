@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  CLINICIAN
+  ANALYST
+}
+
+enum AssignmentStatus {
+  CREATED
+  SENT
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+  REVOKED
+}
+
+enum QuestionType {
+  single_choice
+  multi_choice
+  text
+  number
+}
+
+enum OutreachChannel {
+  sms
+  email
+  whatsapp
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  code      String   @unique
+  createdAt DateTime @default(now())
+
+  users       User[]
+  instruments Instrument[]
+  assignments SurveyAssignment[]
+  audit       AuditEvent[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  role         UserRole @default(TENANT_ADMIN)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, email])
+}
+
+model Instrument {
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  versions SurveyVersion[]
+
+  @@unique([tenantId, key])
+}
+
+model SurveyVersion {
+  id           String   @id @default(cuid())
+  tenantId     String
+  instrumentId String
+  version      String
+  status       String   @default("draft") // draft|published|archived (MVP)
+  language     String   @default("en") // default language for rendering (MVP)
+  title        String
+  createdAt    DateTime @default(now())
+  publishedAt  DateTime?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  sections SurveySection[]
+  rules    LogicRule[]
+
+  @@unique([tenantId, instrumentId, version])
+}
+
+model SurveySection {
+  id             String   @id @default(cuid())
+  tenantId       String
+  surveyVersionId String
+  order          Int
+  titleKey       String
+
+  tenant        Tenant       @relation(fields: [tenantId], references: [id])
+  surveyVersion SurveyVersion @relation(fields: [surveyVersionId], references: [id])
+  groups        QuestionGroup[]
+
+  @@unique([surveyVersionId, order])
+}
+
+model QuestionGroup {
+  id              String   @id @default(cuid())
+  tenantId        String
+  sectionId       String
+  order           Int
+  titleKey        String?
+  subgroupKey     String? // supports “sub-sub” grouping (MVP via label key)
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id])
+  section SurveySection @relation(fields: [sectionId], references: [id])
+  questions Question[]
+
+  @@unique([sectionId, order])
+}
+
+model Question {
+  id           String       @id @default(cuid())
+  tenantId     String
+  groupId      String
+  order        Int
+  type         QuestionType
+  textKey      String
+  isRequired   Boolean      @default(false)
+  scoreWeight  Float        @default(1)
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id])
+  group  QuestionGroup @relation(fields: [groupId], references: [id])
+
+  choices AnswerChoice[]
+
+  @@unique([groupId, order])
+}
+
+model AnswerChoice {
+  id         String   @id @default(cuid())
+  tenantId   String
+  questionId String
+  order      Int
+  labelKey   String
+  value      String
+  score      Float?
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@unique([questionId, order])
+}
+
+model Translation {
+  id             String   @id @default(cuid())
+  tenantId       String
+  surveyVersionId String
+  language       String // en|ar
+  key            String
+  text           String
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  surveyVersion SurveyVersion @relation(fields: [surveyVersionId], references: [id])
+
+  @@unique([surveyVersionId, language, key])
+}
+
+model LogicRule {
+  id             String   @id @default(cuid())
+  tenantId       String
+  surveyVersionId String
+  // MVP: store JSON rule expression for conditional visibility/skip
+  ruleJson       Json
+  createdAt      DateTime @default(now())
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  surveyVersion SurveyVersion @relation(fields: [surveyVersionId], references: [id])
+}
+
+model SurveyAssignment {
+  id             String           @id @default(cuid())
+  tenantId       String
+  instrumentKey  String
+  surveyVersionId String
+  status         AssignmentStatus @default(CREATED)
+
+  // Token security: store only a hash. URL contains opaque token.
+  tokenHash      String           @unique
+  tokenExpiresAt DateTime
+  usedAt         DateTime?
+
+  preferredLanguage String @default("en")
+
+  encounterId    String
+  encounterDate  DateTime
+  clinic         String?
+  department     String?
+  provider       String?
+  diagnosisIcd10 String[] @default([])
+  procedureCodes String[] @default([])
+
+  externalPatientId String?
+  mrnHash           String?
+  nationalIdHash    String?
+
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  surveyVersion SurveyVersion @relation(fields: [surveyVersionId], references: [id])
+  response SurveyResponse?
+  outreach OutreachMessage[]
+
+  @@index([tenantId, instrumentKey, encounterDate])
+  @@index([tenantId, provider, encounterDate])
+  @@index([tenantId, department, encounterDate])
+}
+
+model OutreachMessage {
+  id            String          @id @default(cuid())
+  tenantId      String
+  assignmentId  String
+  channel       OutreachChannel
+  destination   String
+  status        String          @default("queued") // queued|sent|failed
+  providerMsgId String?
+  error         String?
+  createdAt     DateTime        @default(now())
+  sentAt        DateTime?
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id])
+  assignment SurveyAssignment @relation(fields: [assignmentId], references: [id])
+}
+
+model SurveyResponse {
+  id           String   @id @default(cuid())
+  tenantId     String
+  assignmentId String   @unique
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  totalSeconds Int?
+
+  // MVP scoring placeholders
+  rawScore     Float?
+  normalizedScore Float?
+  npsLike      Int?
+  freeText     String?
+  sentiment    String? // placeholder
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id])
+  assignment SurveyAssignment @relation(fields: [assignmentId], references: [id])
+  items      SurveyResponseItem[]
+}
+
+model SurveyResponseItem {
+  id         String   @id @default(cuid())
+  tenantId   String
+  responseId String
+  questionId String
+  answerJson Json
+  createdAt  DateTime @default(now())
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id])
+  response SurveyResponse @relation(fields: [responseId], references: [id])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorUserId String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+}
+
